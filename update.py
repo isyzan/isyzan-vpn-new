@@ -1,16 +1,6 @@
 import base64
+import os
 import urllib.parse
-import requests
-
-# Проверенные сверхбольшие агрегаторы подписок
-SOURCES = [
-    "https://raw.githubusercontent.com/yebekhe/TVC/main/subscriptions/xray/base64",
-    "https://raw.githubusercontent.com/MrMohebi/xray-proxy-grabber/main/sub/sub_merge.txt",
-    "https://raw.githubusercontent.com/v2rayng-sub/v2ray/main/v2ray.txt",
-    "https://raw.githubusercontent.com/freefq/free/master/v2ray",
-]
-
-OUTPUT_NAME = "isyzan vpn"
 
 
 def decode_base64_safe(data_str):
@@ -22,92 +12,113 @@ def decode_base64_safe(data_str):
         return data_str
 
 
-def fetch_nodes(url):
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code != 200:
-            print(f"Ошибка {response.status_code} для {url}")
-            return []
+def parse_and_clean():
+    if not os.path.exists("raw_nodes.txt"):
+        print("Файл raw_nodes.txt не найден!")
+        return []
 
-        content = response.text.strip()
-        decoded = decode_base64_safe(content)
+    with open("raw_nodes.txt", "r", encoding="utf-8", errors="ignore") as f:
+        content = f.read().strip()
+
+    # Попытка декодировать Base64 целиком
+    decoded = decode_base64_safe(content)
+    if any(
+        proto in decoded
+        for proto in [
+            "vless://",
+            "vmess://",
+            "trojan://",
+            "ss://",
+            "hysteria2://",
+            "tuic://",
+        ]
+    ):
+        content = decoded
+
+    lines = content.splitlines()
+    valid_nodes = []
+
+    for line in lines:
+        line = line.strip()
+        # Извлекаем закодированные строки внутри текстовых блоков если они есть
+        if (
+            not line.startswith("vless://")
+            and not line.startswith("vmess://")
+            and not line.startswith("trojan://")
+        ):
+            decoded_line = decode_base64_safe(line)
+            if any(
+                p in decoded_line
+                for p in ["vless://", "vmess://", "trojan://", "ss://"]
+            ):
+                for sub_line in decoded_line.splitlines():
+                    if any(
+                        sub_line.strip().startswith(p)
+                        for p in [
+                            "vless://",
+                            "vmess://",
+                            "trojan://",
+                            "ss://",
+                            "ssr://",
+                            "hysteria2://",
+                            "tuic://",
+                        ]
+                    ):
+                        valid_nodes.append(sub_line.strip())
+                continue
 
         if any(
-            proto in decoded
-            for proto in [
+            line.startswith(p)
+            for p in [
                 "vless://",
                 "vmess://",
                 "trojan://",
                 "ss://",
+                "ssr://",
                 "hysteria2://",
+                "tuic://",
             ]
         ):
-            content = decoded
+            valid_nodes.append(line)
 
-        lines = content.splitlines()
-        valid_lines = [
-            line.strip()
-            for line in lines
-            if any(
-                line.strip().startswith(p)
-                for p in [
-                    "vless://",
-                    "vmess://",
-                    "trojan://",
-                    "ss://",
-                    "ssr://",
-                    "hysteria2://",
-                    "tuic://",
-                ]
-            )
-        ]
-        return valid_lines
-    except Exception as e:
-        print(f"Ошибка при скачивании {url}: {e}")
-        return []
+    # Удаляем дубликаты
+    return list(dict.fromkeys(valid_nodes))
 
 
 def rename_node(node_str, index):
     try:
         base = node_str.split("#")[0] if "#" in node_str else node_str
-        new_name = urllib.parse.quote(f"{OUTPUT_NAME} #{index}")
+        new_name = urllib.parse.quote(f"isyzan vpn #{index}")
         return f"{base}#{new_name}"
     except Exception:
         return node_str
 
 
 def main():
-    raw_nodes = []
-    for src in SOURCES:
-        nodes = fetch_nodes(src)
-        print(f"Успешно получено из {src}: {len(nodes)} узлов")
-        raw_nodes.extend(nodes)
+    nodes = parse_and_clean()
+    print(f"Всего извлечено и расшифровано серверов: {len(nodes)}")
 
-    unique_nodes = list(dict.fromkeys(raw_nodes))
-    print(f"Всего уникальных серверов: {len(unique_nodes)}")
-
-    if not unique_nodes:
-        print("Не удалось извлечь узлы из подписок.")
+    if not nodes:
+        print("Внимание: Не удалось извлечь серверы!")
         return
 
     working_nodes = []
     # Сохраняем первые 100 серверов
-    for i, node in enumerate(unique_nodes[:100], 1):
+    for i, node in enumerate(nodes[:100], 1):
         working_nodes.append(rename_node(node, i))
 
     result_text = "\n".join(working_nodes)
 
+    # Запись в sub.txt
     with open("sub.txt", "w", encoding="utf-8") as f:
         f.write(result_text)
 
+    # Запись в sub_base64.txt
     b64_content = base64.b64encode(result_text.encode("utf-8")).decode("utf-8")
     with open("sub_base64.txt", "w", encoding="utf-8") as f:
         f.write(b64_content)
 
-    print(f"Успешно сохранено {len(working_nodes)} серверов.")
+    print(f"Успешно сгенерирована подписка с {len(working_nodes)} серверами!")
 
 
 if __name__ == "__main__":
